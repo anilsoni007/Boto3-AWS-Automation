@@ -14,6 +14,7 @@ def send_mail_with_attach_ses(sender, recipient, aws_region, subject, account_na
     table_html += "<h2>Missing Tags Report - Account: " + str(account_name) + "</h2>"
     table_html += "<table border='1'><tr><th>Instance ID</th><th>Name</th><th>Missing Tags</th></tr>"
     
+    
     for instance_id, instance_data in table_data.items():
         name = instance_data.get('Name', 'N/A')
         missing_tags = instance_data['MissingTags']
@@ -89,8 +90,8 @@ def lambda_handler(event, context):
     if instances_missing_tags:
         # Send email with attachment using Amazon SES
         subject = "Missing Tags Report for EC2 Instances"
-        sender = 'anilssdsdssdss@gmail.com'  # Replace with your sender email address
-        recipient = 'anisdsss1@gmail.com'  # Replace with recipient email address
+        sender = 'anhslhshs@gmail.com'  # Replace with your sender email address
+        recipient = 'anslsl@gmail.com'  # Replace with recipient email address
         aws_region = os.environ['AWS_REGION']  # Get AWS region from Lambda environment
         send_mail_with_attach_ses(sender, recipient, aws_region, subject, account_name, instances_missing_tags)
     else:
