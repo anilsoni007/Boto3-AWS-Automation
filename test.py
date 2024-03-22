@@ -1,14 +1,13 @@
-
 import boto3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 def get_updated_functions(client):
     updated_functions = []
     # Get a list of all Lambda functions
     functions = client.list_functions()['Functions']
     
-    # Get the cutoff time for last 48 hours
-    cutoff_time = datetime.now() - timedelta(hours=48)
+    # Get the cutoff time for last 48 hours in UTC timezone
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=48)
     
     # Iterate through each function
     for function in functions:
@@ -16,7 +15,7 @@ def get_updated_functions(client):
         last_modified = function['LastModified']
         
         # Convert last modified time string to datetime object
-        last_modified_time = datetime.strptime(last_modified, '%Y-%m-%dT%H:%M:%S.%f%z')
+        last_modified_time = datetime.fromisoformat(last_modified.replace('Z', '+00:00'))
         
         # Check if the function has been updated in the last 48 hours
         if last_modified_time > cutoff_time:
