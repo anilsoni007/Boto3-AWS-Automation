@@ -1,0 +1,53 @@
+#!/bin/bash
+cat <<EOF >/tmp/base
+[base]
+name=CentOS 7 Base Packages
+baseurl=http://mirror.centos.org/centos/7/os/x86_64/
+enabled=1
+gpgcheck=0
+EOF
+
+sudo mv /tmp/base /etc/yum.repos.d/centos-base.repo
+
+cat <<EOF >/tmp/extras
+[extras]
+name=CentOS 7 Extras Packages
+baseurl=http://mirror.centos.org/centos/7/extras/x86_64/
+mirrorlist=http://mirrorlist.centos.org/?release=7&arch=x86_64&repo=extras
+enabled=1
+gpgcheck=0
+EOF
+
+sudo mv /tmp/extras /etc/yum.repos.d/centos-extras.repo
+sudo mv /etc/yum.repos.d/amzn2-core.repo /tmp
+sudo yum update > output.log 2>&1
+echo "============Intalling Podman Package ================"
+sudo yum install podman -y && echo "====Podman Package Installed Successfully==="
+sudo mv /tmp/amzn2-core.repo /etc/yum.repos.d/amzn2-core.repo
+sudo yum update >> output.log 2>&1
+
+echo "============Installing Golang Package==============="
+cd /opt
+sudo wget https://go.dev/dl/go1.21.11.linux-amd64.tar.gz
+sudo tar xf go1.21.11.linux-amd64.tar.gz
+sudo rm -rf go1.21.11.linux-amd64.tar.gz
+sudo mv go /usr/local
+
+# The line to be added to .bashrc
+line='export PATH=$PATH:/usr/local/go/bin'
+
+# Add to the normal user's .bashrc
+grep -qxF "$line" ~/.bashrc || echo "$line" >> ~/.bashrc
+
+# Source the normal user's .bashrc to apply changes immediately
+source ~/.bashrc
+
+# Add to the root user's .bashrc
+sudo bash -c "grep -qxF \"$line\" /root/.bashrc || echo \"$line\" >> /root/.bashrc"
+
+# Source the root user's .bashrc to apply changes immediately
+sudo bash -c "source /root/.bashrc"
+
+echo "Golang installation completed."
+
+
