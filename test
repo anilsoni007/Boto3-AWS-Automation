@@ -12,8 +12,9 @@ def get_parameter_history(parameter_name):
     """
     try:
         response = ssm_client.get_parameter_history(Name=parameter_name, WithDecryption=True)
-        versions = sorted(response['Parameters'][:2], key=lambda x: x['Version'], reverse=True)  # Get the last two versions sorted by version number in descending order
-        return versions
+        versions = sorted(response['Parameters'], key=lambda x: x['Version'], reverse=True)  # Sort by version number in descending order
+        latest_versions = versions[:2]  # Get the latest two versions
+        return latest_versions
     except ClientError as e:
         print(f"Error fetching parameter history for {parameter_name}: {e}")
         return None
