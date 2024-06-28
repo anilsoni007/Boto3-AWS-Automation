@@ -1,53 +1,138 @@
-#!/bin/bash
-cat <<EOF >/tmp/base
-[base]
-name=CentOS 7 Base Packages
-baseurl=http://mirror.centos.org/centos/7/os/x86_64/
-enabled=1
-gpgcheck=0
-EOF
+import boto3
+import os
+from botocore.exceptions import ClientError
 
-sudo mv /tmp/base /etc/yum.repos.d/centos-base.repo
+# Initialize the boto3 clients
+ssm_client = boto3.client('ssm')
+ses_client = boto3.client('ses')
 
-cat <<EOF >/tmp/extras
-[extras]
-name=CentOS 7 Extras Packages
-baseurl=http://mirror.centos.org/centos/7/extras/x86_64/
-mirrorlist=http://mirrorlist.centos.org/?release=7&arch=x86_64&repo=extras
-enabled=1
-gpgcheck=0
-EOF
+def get_parameter_history(parameter_name):
+    """
+    Fetches the last two versions of a parameter from AWS Systems Manager Parameter Store.
+    """
+    try:
+        response = ssm_client.get_parameter_history(Name=parameter_name, WithDecryption=True)
+        versions = sorted(response['Parameters'][:2], key=lambda x: x['Version'], reverse=True)  # Get the last two versions sorted by version number in descending order
+        return versions
+    except ClientError as e:
+        print(f"Error fetching parameter history for {parameter_name}: {e}")
+        return None
 
-sudo mv /tmp/extras /etc/yum.repos.d/centos-extras.repo
-sudo mv /etc/yum.repos.d/amzn2-core.repo /tmp
-sudo yum update > output.log 2>&1
-echo "============Intalling Podman Package ================"
-sudo yum install podman -y && echo "====Podman Package Installed Successfully==="
-sudo mv /tmp/amzn2-core.repo /etc/yum.repos.d/amzn2-core.repo
-sudo yum update >> output.log 2>&1
+def send_email(sender, recipient, cc_addresses, subject, body_html):
+    """
+    Sends an email using AWS Simple Email Service (SES).
+    """
+    try:
+        response = ses_client.send_email(
+            Source=sender,
+            Destination={
+                'ToAddresses': [recipient],
+                'CcAddresses': cc_addresses
+            },
+            Message={
+                'Subject': {
+                    'Data': subject
+                },
+                'Body': {
+                    'Html': {
+                        'Data': body_html
+                    }
+                }
+            }
+        )
+        return response
+    except ClientError as e:
+        print(f"Error sending email: {e}")
+        return None
 
-echo "============Installing Golang Package==============="
-cd /opt
-sudo wget https://go.dev/dl/go1.21.11.linux-amd64.tar.gz
-sudo tar xf go1.21.11.linux-amd64.tar.gz
-sudo rm -rf go1.21.11.linux-amd64.tar.gz
-sudo mv go /usr/local
+def generate_html_table(parameter_name, aws_account_name, account_number, versions):
+    """
+    Generates two HTML tables with the latest and older version of the parameter.
+    """
+    heading = f"""
+    <body>
+        <h3 style="color:#0000FF">A new AMI is released and below are the latest versions for account: {account_number}</h3>
+    """
+    
+    latest_version = versions[0]
+    older_version = versions[1] if len(versions) > 1 else None
 
-# The line to be added to .bashrc
-line='export PATH=$PATH:/usr/local/go/bin'
+    latest_table = f"""
+    <h4 style="color:#008000">Latest Version:</h4>
+    <table border="1">
+        <tr>
+            <th>Parameter Name</th>
+            <th>AWS Account Name</th>
+            <th>Version</th>
+            <th>Value</th>
+        </tr>
+        <tr>
+            <td>{parameter_name}</td>
+            <td>{aws_account_name}</td>
+            <td>{latest_version['Version']}</td>
+            <td>{latest_version['Value']}</td>
+        </tr>
+    </table>
+    """
 
-# Add to the normal user's .bashrc
-grep -qxF "$line" ~/.bashrc || echo "$line" >> ~/.bashrc
+    if older_version:
+        older_table = f"""
+        <h4 style="color:#FF0000">Older Version:</h4>
+        <table border="1">
+            <tr>
+                <th>Parameter Name</th>
+                <th>AWS Account Name</th>
+                <th>Version</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>{parameter_name}</td>
+                <td>{aws_account_name}</td>
+                <td>{older_version['Version']}</td>
+                <td>{older_version['Value']}</td>
+            </tr>
+        </table>
+        """
+    else:
+        older_table = ""
 
-# Source the normal user's .bashrc to apply changes immediately
-source ~/.bashrc
+    return heading + latest_table + older_table + "</body>"
 
-# Add to the root user's .bashrc
-sudo bash -c "grep -qxF \"$line\" /root/.bashrc || echo \"$line\" >> /root/.bashrc"
-
-# Source the root user's .bashrc to apply changes immediately
-sudo bash -c "source /root/.bashrc"
-
-echo "Golang installation completed."
-
-
+def lambda_handler(event, context):
+    """
+    AWS Lambda function entry point.
+    """
+    # Define the parameter name and email details
+    parameter_name = os.getenv('PARAMETER_NAME')
+    sender = os.getenv('SENDER_EMAIL')
+    recipient = os.getenv('RECIPIENT_EMAIL')
+    cc_addresses = os.getenv('CC_EMAILS').split(',')
+    aws_account_name = os.getenv('AWS_ACCOUNT_NAME')
+    account_number = os.getenv('ACCOUNT_NUMBER')
+    subject = 'Parameter Store Value History'
+    
+    # Fetch the parameter history
+    parameter_history = get_parameter_history(parameter_name)
+    
+    if parameter_history:
+        # Generate the HTML table with the parameter history
+        body_html = generate_html_table(parameter_name, aws_account_name, account_number, parameter_history)
+        
+        # Send the email with the parameter history table
+        email_response = send_email(sender, recipient, cc_addresses, subject, body_html)
+        
+        if email_response:
+            return {
+                'statusCode': 200,
+                'body': 'Email sent successfully!'
+            }
+        else:
+            return {
+                'statusCode': 500,
+                'body': 'Failed to send email.'
+            }
+    else:
+        return {
+            'statusCode': 500,
+            'body': f'Failed to fetch parameter history: {parameter_name}'
+        }
