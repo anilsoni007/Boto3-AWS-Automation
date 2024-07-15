@@ -1,1 +1,17 @@
+def createOrUpdateUser() {
+    String empId = configHolder.buildUserId.toString()
+    if (empId ==~ /\d+/) { // Check if the string contains only digits
+        empId = empId.toInteger().toString() // Convert to integer and back to string to strip leading zeros
+    } else {
+        throw new IllegalArgumentException("Invalid EmpId: ${empId}")
+    }
+
+    String jsonRequestBody = """{
+        "EmpId": $empId,
+        "EmpEmail": "${configHolder.buildUserEmail}",
+        "Privilege": "${context.PERMISSION}",
+        "DBName": "${context.DB_CLUSTER}"
+    }"""
+    return commonPost("${getSNSPublisher()}/v1/user", jsonRequestBody)
+}
 
