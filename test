@@ -1,1 +1,1 @@
-yy
+aws imagebuilder list-image-recipes --filters 'Name=name,Values=gold-recipe' --query 'ImageRecipeSummaryList[*].Arn' --output text
