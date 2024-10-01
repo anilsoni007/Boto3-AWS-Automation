@@ -1,1 +1,2 @@
 
+String tagJsonArray = tags.collect { tag -> '{"Key": "' + tag.Key + '", "Value": "' + tag.Value + '"}' }.join(",")
