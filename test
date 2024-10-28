@@ -1,38 +1,112 @@
+import json
 import boto3
 import datetime
-from collections import defaultdict
+from boto3.session import Session
+
+# Set your SES sender and recipient emails
+SENDER = "sender@example.com"
+RECIPIENT = "recipient@example.com"
+AWS_REGION = "us-west-2"  # Update this with your SES region
+SUBJECT = "Non-Compliant IAM Users Report"
+CHARSET = "UTF-8"
+
+def max_get_role(account_id):
+    # Role ARN mapping
+    if account_id == '8999xxxx':
+        return 'arn:aws:iam::8999xxxx:role/tf-lambda-security-standards-lambda-role'
+    elif account_id == '56999xxxxx':
+        return 'arn:aws:iam::56999xxxxx:role/tf-lambda-security-standards-lambda-role'
+    elif account_id == '186733691':
+        return 'arn:aws:iam::186733691:role/tf-lambda-security-standards-lambda-role'
+    else:
+        print("Invalid account ID")
+        return None
+
+def max_assume_role(account_id):
+    # Assumes a role and retrieves temporary credentials
+    role_arn = max_get_role(account_id)
+    if not role_arn:
+        raise ValueError("Role ARN could not be determined")
+    
+    client = boto3.client('sts')
+    session_name = 'lambda_session'
+    response = client.assume_role(RoleArn=role_arn, RoleSessionName=session_name)
+    
+    return Session(
+        aws_access_key_id=response['Credentials']['AccessKeyId'],
+        aws_secret_access_key=response['Credentials']['SecretAccessKey'],
+        aws_session_token=response['Credentials']['SessionToken']
+    )
+
+def get_non_compliant_iam_keys(iam_client):
+    # Checks IAM access keys and returns non-compliant users
+    access_key_max_age = 40
+    inactive_age = 90
+    non_compliant_users = []
+
+    users = iam_client.list_users()
+    for user in users['Users']:
+        access_keys = iam_client.list_access_keys(UserName=user['UserName'])
+        
+        for key in access_keys['AccessKeyMetadata']:
+            delta = datetime.datetime.now() - key['CreateDate'].replace(tzinfo=None)
+            if (delta.days > access_key_max_age and key['Status'] == 'Active'):
+                user_info = {
+                    'UserName': user['UserName'],
+                    'iam-access-key': key['AccessKeyId'],
+                    'access_key_age': f"{delta.days} days"
+                }
+                non_compliant_users.append(user_info)
+            elif (delta.days > inactive_age and key['Status'] == 'Active'):
+                if iam_client.get_login_profile(UserName=user['UserName']):
+                    iam_client.update_access_key(
+                        AccessKeyId=key['AccessKeyId'],
+                        Status='Inactive',
+                        UserName=user['UserName']
+                    )
+                    user_info = {
+                        'UserName': user['UserName'],
+                        'iam-access-key': key['AccessKeyId'],
+                        'Access Key Deactivated': 'Done'
+                    }
+                    non_compliant_users.append(user_info)
+    
+    return non_compliant_users
+
+def send_email(non_compliant_users):
+    # Sends an email with the list of non-compliant users
+    client = boto3.client('ses', region_name=AWS_REGION)
+    body = "Non-Compliant IAM Users Report:\n\n" + json.dumps(non_compliant_users, indent=4)
+    
+    try:
+        response = client.send_email(
+            Destination={'ToAddresses': [RECIPIENT]},
+            Message={
+                'Body': {'Text': {'Charset': CHARSET, 'Data': body}},
+                'Subject': {'Charset': CHARSET, 'Data': SUBJECT},
+            },
+            Source=SENDER,
+        )
+        print("Email sent! Message ID:", response['MessageId'])
+    except Exception as e:
+        print("Error sending email:", e)
 
 def lambda_handler(event, context):
-    ec2 = boto3.client('ec2')
+    account_id = event.get('account_id', 'your-default-account-id')
+    self_flag = event.get('self_flag', True)
     
-    # Get the current date and the last two days
-    today = datetime.datetime.now().date()
-    date_list = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(3)]
-    
-    # Create a dictionary to hold volume counts for each date
-    volume_count_by_date = defaultdict(int)
+    # If not self-account, assume role
+    if self_flag:
+        iam_client = boto3.client('iam')
+    else:
+        session = max_assume_role(account_id)
+        iam_client = session.client('iam', region_name='us-west-2')
 
-    # Describe EBS volumes
-    response = ec2.describe_volumes()
+    # Get non-compliant IAM users
+    non_compliant_users = get_non_compliant_iam_keys(iam_client)
 
-    # Get the current date for comparison
-    current_date = datetime.datetime.now().date()
-
-    # Count available volumes by their creation date
-    for volume in response['Volumes']:
-        if volume['State'] == 'available':
-            # Get the creation date of the volume
-            creation_date = volume['CreateTime'].date()
-            # Count it only if it's within the last two days or today
-            if creation_date >= current_date - datetime.timedelta(days=2):
-                volume_count_by_date[creation_date.strftime('%Y-%m-%d')] += 1
-
-    # Print the results for today and the last two days
-    for date in date_list[::-1]:  # Reverse the order for recent dates first
-        count = volume_count_by_date.get(date, 0)
-        print(f"{date} available EBS volume count is {count}")
-
-    return {
-        'statusCode': 200,
-        'body': volume_count_by_date
-    }
+    # Send email if there are any non-compliant users
+    if non_compliant_users:
+        send_email(non_compliant_users)
+    else:
+        print("No non-compliant users found.")
