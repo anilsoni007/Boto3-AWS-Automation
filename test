@@ -15,12 +15,16 @@ def lambda_handler(event, context):
     # Describe EBS volumes
     response = ec2.describe_volumes()
 
-    # Iterate through volumes and count available ones
+    # Get the current date for comparison
+    current_date = datetime.datetime.now().date()
+
+    # Count available volumes by their creation date
     for volume in response['Volumes']:
         if volume['State'] == 'available':
             # Get the creation date of the volume
             creation_date = volume['CreateTime'].date()
-            if creation_date in date_list:
+            # Count it only if it's within the last two days or today
+            if creation_date >= current_date - datetime.timedelta(days=2):
                 volume_count_by_date[creation_date.strftime('%Y-%m-%d')] += 1
 
     # Print the results for today and the last two days
