@@ -1,2 +1,34 @@
+import boto3
+import datetime
+from collections import defaultdict
 
-String tagJsonArray = tags.collect { tag -> '{"Key": "' + tag.Key + '", "Value": "' + tag.Value + '"}' }.join(",")
+def lambda_handler(event, context):
+    ec2 = boto3.client('ec2')
+    
+    # Get the current date and the last two days
+    today = datetime.datetime.now().date()
+    date_list = [(today - datetime.timedelta(days=i)).strftime('%Y-%m-%d') for i in range(3)]
+    
+    # Create a dictionary to hold volume counts for each date
+    volume_count_by_date = defaultdict(int)
+
+    # Describe EBS volumes
+    response = ec2.describe_volumes()
+
+    # Iterate through volumes and count available ones
+    for volume in response['Volumes']:
+        if volume['State'] == 'available':
+            # Get the creation date of the volume
+            creation_date = volume['CreateTime'].date()
+            if creation_date in date_list:
+                volume_count_by_date[creation_date.strftime('%Y-%m-%d')] += 1
+
+    # Print the results for today and the last two days
+    for date in date_list[::-1]:  # Reverse the order for recent dates first
+        count = volume_count_by_date.get(date, 0)
+        print(f"{date} available EBS volume count is {count}")
+
+    return {
+        'statusCode': 200,
+        'body': volume_count_by_date
+    }
